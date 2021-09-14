@@ -95,6 +95,7 @@ public class MainActivity extends AppCompatActivity {
         recorder.start();
     }
 
+    //KAYDI BİTİRMEK İÇİN
     private void stopRecording() {
         recorder.stop();
         recorder.release();
@@ -177,6 +178,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+
     public void onStop() {
         super.onStop();
         if (recorder != null) {
