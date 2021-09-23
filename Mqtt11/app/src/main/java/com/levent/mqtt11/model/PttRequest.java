@@ -7,10 +7,12 @@ public class PttRequest {
     public String uniqueId;
     @JsonProperty("Stream")
     public byte[] stream;
-    @JsonProperty("Length")
-    public int length;
+    @JsonProperty("IsFinished")
+    public boolean isFinished;
     @JsonProperty("ChunkSize")
     public int chunkSize;
     @JsonProperty("Extenstion")
     public String extenstion;
+    @JsonProperty("ClientID")
+    public String clientId;
 }

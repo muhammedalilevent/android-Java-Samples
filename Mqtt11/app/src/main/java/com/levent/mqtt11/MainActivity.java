@@ -1,54 +1,22 @@
 package com.levent.mqtt11;
 
-import static android.icu.lang.UCharacter.GraphemeClusterBreak.T;
-
 import androidx.annotation.NonNull;
-import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.content.pm.PackageManager;
-import android.os.Build;
 import android.os.Bundle;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
-import android.widget.Toast;
+import android.widget.TextView;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.google.gson.Gson;
-import com.levent.mqtt11.model.PttRequest;
-import com.levent.mqtt11.model.Request;
-
-import org.eclipse.paho.android.service.MqttAndroidClient;
-import org.eclipse.paho.client.mqttv3.IMqttActionListener;
-import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
-import org.eclipse.paho.client.mqttv3.IMqttToken;
-import org.eclipse.paho.client.mqttv3.MqttCallback;
-import org.eclipse.paho.client.mqttv3.MqttClient;
-import org.eclipse.paho.client.mqttv3.MqttException;
-import org.eclipse.paho.client.mqttv3.MqttMessage;
-import org.json.JSONException;
-import org.json.JSONObject;
-
-import java.io.IOException;
-import java.lang.reflect.Type;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.Arrays;
-import java.util.Base64;
-import java.util.Map;
-import java.util.UUID;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.ObjectWriter;
+import com.levent.mqtt11.MqttManager.MqttManager;
 
 
 public class MainActivity extends AppCompatActivity {
-
-
-    MqttAndroidClient client;
 
 
     private boolean permissionToRecordAccepted = false;
@@ -57,16 +25,26 @@ public class MainActivity extends AppCompatActivity {
 
     private final String[] permissions = {Manifest.permission.RECORD_AUDIO};
 
-    //final String clientUuid = UUID.randomUUID().toString();
 
-    String clientId = MqttClient.generateClientId();
+    AudioHandler mAudioHandler;
 
-    Recorder mRecorder;
+    String serverURI = "tcp://192.168.1.42:1884";
 
+    MqttManager mqttManager;
+
+    boolean micState = false;
+
+    boolean connectionState = false;
+boolean btnRecorderState = false;
 
     //Widgets
     private Button btnPTT;
+    private Button btnEndRecord;
+    private TextView txtConnState;
 
+
+
+    @SuppressLint("ClickableViewAccessibility")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -74,188 +52,170 @@ public class MainActivity extends AppCompatActivity {
 
         ActivityCompat.requestPermissions(this, permissions, REQUEST_RECORD_AUDIO_PERMISSION);
 
+        mqttManager = new MqttManager(MainActivity.this, serverURI);
 
-        client = new MqttAndroidClient(this.getApplicationContext(), "tcp://192.168.1.34:1884", clientId);
+        mqttManager.setConnectionStateListener(_connectionState -> {
+            System.out.println("connectionState STATE "+_connectionState );
+            if (_connectionState) {
+
+                txtConnState.setText("Connected");
+
+            } else {
+
+                txtConnState.setText("Not Connected");
+
+            }
+
+
+            btnPTT.setVisibility(_connectionState ? View.VISIBLE : View.INVISIBLE);
+           // btnEndRecord.setEnabled(_connectionState);
+
+            connectionState = _connectionState;
+
+        });
 
         btnPTT = findViewById(R.id.btnPTT);
 
-        mRecorder = new Recorder(getExternalCacheDir().getAbsolutePath());
+        btnPTT.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View view, MotionEvent motionEvent) {
 
+                switch (motionEvent.getAction()){
 
-    }
+                    case MotionEvent.ACTION_DOWN:
+                        //PRESSED
+                        if (micState == false) {
 
-    public void connect(View view) {
+                            mAudioHandler.threadVoiceRecorder();
+                            micState = true;
+                        }
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                        if (micState == true) {
 
-        System.out.println("butona basıldı");
+                            mAudioHandler.stopRecord();
 
-        try {
-            System.out.println("try içi");
-            IMqttToken token = client.connect();
-            token.setActionCallback(new IMqttActionListener() {
-                @Override
-                public void onSuccess(IMqttToken asyncActionToken) {
-                    System.out.println("Bağlandı");
-                    Toast.makeText(MainActivity.this, "connected!!", Toast.LENGTH_LONG).show();
-                    setSubscription();
-
+                            micState = false;
+                        }
+                        //RELEASED
+                        return true;
                 }
 
-                @Override
-                public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
-
-                    System.out.println("Hata");
-
-                    Toast.makeText(MainActivity.this, "connection failed!!", Toast.LENGTH_LONG).show();
-                }
-            });
-        } catch (MqttException e) {
-            e.printStackTrace();
-            System.out.println("Hata"+ e);
-        }
-
-        client.setCallback(new MqttCallback() {
-            @Override
-            public void connectionLost(Throwable cause) {
-
-            }
-
-            @Override
-            public void messageArrived(String topic, MqttMessage message) throws Exception {
-                System.out.println("Message Arrived "+message.getPayload());
-
-                convertRequestToRecord(message.getPayload());
-
-
-            }
-
-            @Override
-            public void deliveryComplete(IMqttDeliveryToken token) {
-
+                return false;
             }
         });
 
-    }
 
-    private void setSubscription() {
+        btnEndRecord = findViewById(R.id.btnEndRecord);
+        txtConnState = findViewById(R.id.txtConnState);
 
-        try {
+        btnPTT.setVisibility(View.INVISIBLE);
 
-            client.subscribe("event", 0);
+        btnEndRecord.setVisibility(View.INVISIBLE);
 
+        mAudioHandler = new AudioHandler(mqttManager);
 
-        } catch (MqttException e) {
-            e.printStackTrace();
-        }
-    }
+        /*mAudioHandler.setWorkingModeChangedListener(isBusy -> {
+            btnRecorderState = isBusy;
+            runOnUiThread(()->
+                    {
+                        if(btnRecorderState && btnPTT.getVisibility() == View.VISIBLE) {
+                            //btnPTT.setEnabled(false);
+                            btnPTT.setVisibility(View.INVISIBLE);
+                            System.out.println("Butonum Kapanmalı Değer False Olmalı "+btnPTT.getVisibility() );
+                        }
+                        if(!btnRecorderState && btnPTT.getVisibility() == View.INVISIBLE)
+                        {
+                            //btnPTT.setEnabled(true);
+                            btnPTT.setVisibility(View.VISIBLE);
+                            System.out.println("Butonum Kapanmalı Değer True Olmalı "+btnPTT.getVisibility() );
+                        }
+                    });
+//            if(isBusy && btnPTT.isEnabled()) {
+//                btnPTT.setEnabled(false);
+//                System.out.println("Butonum Kapanmalı Değer False Olmalı "+btnPTT.isEnabled() );
+//            }
+//            if(!isBusy && !btnPTT.isEnabled())
+//            {
+//                btnPTT.setEnabled(true);
+//                System.out.println("Butonum Kapanmalı Değer True Olmalı "+btnPTT.isEnabled() );
+//            }
 
-    public void startRecord(View view) {
-
-        mRecorder.startRecord();
-
-
-    }
-
-    public void stopRecord(View view) throws JsonProcessingException {
-
-        publishMessage(mRecorder.stopRecord());
-
-    }
-
-    public void publishMessage(String dataPath) throws JsonProcessingException {
-
-        byte[] message =   convertRecordToRequest(dataPath);
-
-        String topic = "event";
-
-        try {
-            client.publish(topic, message,0,false);
-        } catch ( MqttException e) {
-            e.printStackTrace();
-        }
-
-
-    }
-
-    public byte[] convertRecordToRequest(String dataPath) throws JsonProcessingException {
-
-        byte[] encoded = new byte[0];
-
-        final String recordUuid = UUID.randomUUID().toString();
-
-        try {
-            encoded = Files.readAllBytes(Paths.get(dataPath));
-            System.out.println(Arrays.toString(encoded));
-        } catch (IOException e) {
-
-            System.out.println("Hata "+e);
-
-        }
-
-        Request<PttRequest> request  = new Request<PttRequest>();
-
-        request.requestType = 101;
-        request.data = new PttRequest();
-        request.data.uniqueId = clientId+"_"+recordUuid;
-        request.data.stream = encoded;
-        request.data.length = encoded.length;
-        request.data.chunkSize = encoded.length;
-        request.data.extenstion = ".3gp";
-
-        System.out.println("Uzunluk "+encoded.length);
+        }  );*/
 
 
-        ObjectWriter ow = new ObjectMapper().writer().withDefaultPrettyPrinter();
-        String json = ow.writeValueAsString(request);
-        byte[] convertedToBytesJsonRequest = null;
+//        mAudioHandler.setWorkingModeChangedListener(isBusy -> {
+//            if(isBusy && btnPTT.isEnabled()) {
+//                btnRecorderState =false;
+//                btnPTT.setEnabled(false);
+//                System.out.println("Butonum Kapanmalı Değer False Olmalı "+btnPTT.isEnabled() );
+//            }
+//            if(!isBusy && !btnPTT.isEnabled())
+//            {
+//                btnRecorderState =true;
+//                btnPTT.setEnabled(true);
+//                System.out.println("Butonum Kapanmalı Değer True Olmalı "+btnPTT.isEnabled() );
+//            }
+//
+//        }  );
 
-        System.out.println(json);
+        /*mAudioHandler.setWorkingModeChangedListener(isBusy -> {
 
-            convertedToBytesJsonRequest = json.getBytes();
+            btnPTT.setEnabled(!isBusy);
 
-        byte[] encoded2 = Base64.getEncoder().encode(convertedToBytesJsonRequest);
-
-
-        return encoded2;
+        }  );*/
 
     }
 
-    public void convertRequestToRecord(byte[] response) throws JSONException, JsonProcessingException {
-
-        byte[] decodedResponse = Base64.getDecoder().decode(response);
-
-        JSONObject sample = new JSONObject(new String(decodedResponse));
-
-        System.out.println(sample);
-
-        //Gson gson = new Gson();
 
 
 
 
+    public void connect(View view) {
 
-        ObjectMapper mapper = new ObjectMapper();
-        Request<PttRequest> map = null;
-        try {
-            map = mapper.readValue(decodedResponse, new TypeReference<Request<PttRequest>>() {
+        //init
+        if (!connectionState) {
 
-            });
-            System.out.println("BAŞARILI "+map.data.length);
-        } catch (IOException e) {
-            e.printStackTrace();
-            System.out.println("DENEME CATCH "+map.data);
+            mqttManager.connect();
+            mqttManager.enableListeners();
+            connectionState = true;
+
         }
 
 
     }
+
+    /*public void startRecord(View view) {
+
+        if (micState == false) {
+
+            mAudioHandler.threadVoiceRecorder();
+            micState = true;
+        }
+
+
+    }*/
+
+    /*public void stopRecord(View view) {
+
+        if (micState == true) {
+
+            mAudioHandler.stopRecord();
+
+            micState = false;
+        }
+
+
+    }*/
 
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        switch (requestCode){
+        switch (requestCode) {
             case REQUEST_RECORD_AUDIO_PERMISSION:
-                permissionToRecordAccepted  = grantResults[0] == PackageManager.PERMISSION_GRANTED;
+                permissionToRecordAccepted = grantResults[0] == PackageManager.PERMISSION_GRANTED;
                 break;
         }
-        if (!permissionToRecordAccepted ) finish();
+        if (!permissionToRecordAccepted) finish();
 
     }
 

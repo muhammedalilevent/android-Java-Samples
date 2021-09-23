@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">AudioRecorderSample1.0</string>
+    <string name="start">Start</string>
+    <string name="stop">Stop</string>
+    <string name="enter_gain">Enter Gain</string>
+    <string name="textview">TextView</string>
+    <string name="name">Name</string>
+</resources>
